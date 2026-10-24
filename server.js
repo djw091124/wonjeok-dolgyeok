@@ -42,7 +42,7 @@ wss.on('connection', ws => {
     } else if (msg.type === 'cancel') {
       if (waiting === ws) waiting = null;
       send(ws, { type: 'cancelled' });
-    } else if (ws.room && ['state', 'damage', 'heal', 'attack', 'result', 'ready'].includes(msg.type)) {
+    } else if (ws.room && ['state', 'damage', 'heal', 'attack', 'pull', 'pooDamage', 'result', 'ready'].includes(msg.type)) {
       broadcast(ws.room, ws, { ...msg, sender: ws.name });
     }
   });
