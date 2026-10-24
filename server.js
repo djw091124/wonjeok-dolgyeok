@@ -28,8 +28,8 @@ wss.on('connection', ws => {
     if (msg.type === 'join') {
       if (ws.room) return;
       ws.name = String(msg.name || '플레이어').slice(0, 16);
-      ws.fighter = ['spider','hammer'].includes(msg.fighter) ? msg.fighter : 'spider';
-      ws.fighterHp = Number(msg.hp) || (ws.fighter === 'hammer' ? 105 : 100);
+      ws.fighter = ['spider','hammer','vampire'].includes(msg.fighter) ? msg.fighter : 'spider';
+      ws.fighterHp = Number(msg.hp) || (ws.fighter === 'hammer' ? 105 : ws.fighter === 'vampire' ? 90 : 100);
       if (waiting && waiting.readyState === WebSocket.OPEN && waiting !== ws) {
         const a = waiting; waiting = null;
         const room = { id: String(nextRoom++), players: [a, ws] };
@@ -42,7 +42,7 @@ wss.on('connection', ws => {
     } else if (msg.type === 'cancel') {
       if (waiting === ws) waiting = null;
       send(ws, { type: 'cancelled' });
-    } else if (ws.room && ['state', 'damage', 'attack', 'result', 'ready'].includes(msg.type)) {
+    } else if (ws.room && ['state', 'damage', 'heal', 'attack', 'result', 'ready'].includes(msg.type)) {
       broadcast(ws.room, ws, { ...msg, sender: ws.name });
     }
   });
