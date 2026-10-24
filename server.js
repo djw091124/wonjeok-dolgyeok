@@ -28,8 +28,8 @@ wss.on('connection', ws => {
     if (msg.type === 'join') {
       if (ws.room) return;
       ws.name = String(msg.name || '플레이어').slice(0, 16);
-      ws.fighter = ['spider','hammer','vampire'].includes(msg.fighter) ? msg.fighter : 'spider';
-      ws.fighterHp = Number(msg.hp) || (ws.fighter === 'hammer' ? 105 : ws.fighter === 'vampire' ? 90 : 100);
+      ws.fighter = ['spider','hammer','vampire','poojizik'].includes(msg.fighter) ? msg.fighter : 'spider';
+      ws.fighterHp = Number(msg.hp) || (ws.fighter === 'hammer' ? 105 : ws.fighter === 'vampire' ? 90 : ws.fighter === 'poojizik' ? 95 : 100);
       if (waiting && waiting.readyState === WebSocket.OPEN && waiting !== ws) {
         const a = waiting; waiting = null;
         const room = { id: String(nextRoom++), players: [a, ws] };
