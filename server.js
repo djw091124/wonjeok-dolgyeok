@@ -28,12 +28,14 @@ wss.on('connection', ws => {
     if (msg.type === 'join') {
       if (ws.room) return;
       ws.name = String(msg.name || '플레이어').slice(0, 16);
+      ws.fighter = ['spider','hammer'].includes(msg.fighter) ? msg.fighter : 'spider';
+      ws.fighterHp = Number(msg.hp) || (ws.fighter === 'hammer' ? 105 : 100);
       if (waiting && waiting.readyState === WebSocket.OPEN && waiting !== ws) {
         const a = waiting; waiting = null;
         const room = { id: String(nextRoom++), players: [a, ws] };
         rooms.set(room.id, room); a.room = ws.room = room;
-        send(a, { type: 'matched', slot: 0, opponent: ws.name, room: room.id });
-        send(ws, { type: 'matched', slot: 1, opponent: a.name, room: room.id });
+        send(a, { type: 'matched', slot: 0, opponent: ws.name, fighter: ws.fighter, hp: ws.fighterHp, room: room.id });
+        send(ws, { type: 'matched', slot: 1, opponent: a.name, fighter: a.fighter, hp: a.fighterHp, room: room.id });
       } else {
         waiting = ws; send(ws, { type: 'waiting', message: '상대를 찾는 중입니다…' });
       }
