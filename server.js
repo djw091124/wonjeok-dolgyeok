@@ -9,9 +9,24 @@ const DATA_DIR = process.env.DATA_DIR || (fs.existsSync('/data') ? '/data' : pat
 const DB_FILE = path.join(DATA_DIR, 'accounts.json');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 function loadAccounts(){
-  for (const candidate of [DB_FILE, DB_FILE+'.bak']) {
-    try { const v=JSON.parse(fs.readFileSync(candidate,'utf8')); if(v && v.users && typeof v.users==='object') return v; } catch {}
+  // 계정이 0개인 새 DB보다 사용자 데이터가 남은 백업/이전 경로를 우선한다.
+  const candidates=[...new Set([DB_FILE,DB_FILE+'.bak',path.join(ROOT,'data','accounts.json'),path.join(ROOT,'data','accounts.json.bak'),path.join(ROOT,'accounts.json')])];
+  const valid=[];
+  for (const candidate of candidates) {
+    try { const v=JSON.parse(fs.readFileSync(candidate,'utf8')); if(v && v.users && typeof v.users==='object') valid.push({candidate,value:v,count:Object.keys(v.users).length}); } catch {}
   }
+  valid.sort((a,b)=>b.count-a.count);
+  const found=valid.find(x=>x.count>0)||valid[0];
+  if(found){
+    if(found.candidate!==DB_FILE && found.count>0){
+      try { const tmp=DB_FILE+'.migrate.tmp'; fs.writeFileSync(tmp,JSON.stringify(found.value),{mode:0o600}); fs.renameSync(tmp,DB_FILE); console.log(`기존 계정 DB 복구/이전: ${found.candidate} -> ${DB_FILE} (${found.count}개 계정)`); }
+      catch(e) { console.error('기존 계정 DB 이전 실패:',e.message); }
+    }
+    console.log(`계정 DB 읽음: ${found.candidate} (${found.count}개 계정)`);
+    return found.value;
+  }
+  console.warn(`기존 계정 DB를 찾지 못했습니다. 새 계정 DB로 시작합니다: ${DB_FILE}`);
+  console.warn('Render 재배포 후 계정/랭킹 유지에는 Persistent Disk가 /data에 마운트되어 있어야 합니다. 이미 삭제된 DB는 백업 파일이 없으면 코드만으로 복구할 수 없습니다.');
   return {users:{}};
 }
 let accountDB=loadAccounts();
