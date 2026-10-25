@@ -12,11 +12,11 @@ function loadAccounts(){ try { const v=JSON.parse(fs.readFileSync(DB_FILE,'utf8'
 let accountDB=loadAccounts();
 function saveAccounts(){ const tmp=DB_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(accountDB), {mode:0o600}); fs.renameSync(tmp, DB_FILE); }
 const sessions = new Map();
-function publicProfile(u){ const p=u.profile||{}; return {name:u.name,trophies:Number(p.trophies)||0,wins:Number(p.wins)||0,losses:Number(p.losses)||0,best:Number(p.best)||0,history:Array.isArray(p.history)?p.history.slice(0,12):[],unlocked:Array.isArray(p.unlocked)?p.unlocked:['spider']}; }
+function publicProfile(u){ const p=u.profile||{}; return {name:u.name,trophies:Number(p.trophies)||0,wins:Number(p.wins)||0,losses:Number(p.losses)||0,best:Number(p.best)||0,history:Array.isArray(p.history)?p.history.slice(0,12):[],unlocked:Array.isArray(p.unlocked)?p.unlocked:['spider'],mailClaimed:!!p.mailClaimed}; }
 function hashPassword(password,salt){ return crypto.scryptSync(password,salt,64).toString('hex'); }
 function readBody(req){ return new Promise((resolve,reject)=>{let s='',size=0;req.on('data',c=>{size+=c.length;if(size>100000){reject(new Error('요청이 너무 큽니다.'));req.destroy();return;}s+=c;});req.on('end',()=>{try{resolve(JSON.parse(s||'{}'));}catch{reject(new Error('요청 형식이 올바르지 않습니다.'));}});req.on('error',reject);}); }
 function sendJSON(res,status,obj){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(obj));}
-function cleanProfile(p, name){ p=p&&typeof p==='object'?p:{}; return {name,trophies:Math.max(0,Math.min(1000000,Math.floor(Number(p.trophies)||0))),wins:Math.max(0,Math.floor(Number(p.wins)||0)),losses:Math.max(0,Math.floor(Number(p.losses)||0)),best:Math.max(0,Math.floor(Number(p.best)||0),Math.floor(Number(p.trophies)||0)),history:Array.isArray(p.history)?p.history.slice(0,12).map(h=>({win:!!h.win,fighter:String(h.fighter||'전사').slice(0,30),at:String(h.at||'').slice(0,30)})):[],unlocked:Array.isArray(p.unlocked)?[...new Set(['spider',...p.unlocked.filter(x=>['spider','hammer','vampire','poojizik','meto'].includes(x))])]:['spider']}; }
+function cleanProfile(p, name){ p=p&&typeof p==='object'?p:{}; return {name,trophies:Math.max(0,Math.min(1000000,Math.floor(Number(p.trophies)||0))),wins:Math.max(0,Math.floor(Number(p.wins)||0)),losses:Math.max(0,Math.floor(Number(p.losses)||0)),best:Math.max(0,Math.floor(Number(p.best)||0),Math.floor(Number(p.trophies)||0)),history:Array.isArray(p.history)?p.history.slice(0,12).map(h=>({win:!!h.win,fighter:String(h.fighter||'전사').slice(0,30),at:String(h.at||'').slice(0,30)})):[],unlocked:Array.isArray(p.unlocked)?[...new Set(['spider',...p.unlocked.filter(x=>['spider','hammer','vampire','poojizik','meto'].includes(x))])]:['spider'],mailClaimed:!!p.mailClaimed}; }
 const server = http.createServer(async (req, res) => {
   const pathname = decodeURIComponent((req.url || '/').split('?')[0]);
   if(pathname.startsWith('/api/')){
@@ -31,7 +31,7 @@ const server = http.createServer(async (req, res) => {
         if(pathname==='/api/signup'){
           if(accountDB.users[key]) return sendJSON(res,409,{error:'이미 사용 중인 이름입니다. 다른 이름을 사용해 주세요.'});
           const salt=crypto.randomBytes(16).toString('hex');
-          const profile={name,trophies:0,wins:0,losses:0,best:0,history:[],unlocked:['spider']};
+          const profile={name,trophies:0,wins:0,losses:0,best:0,history:[],unlocked:['spider'],mailClaimed:false};
           accountDB.users[key]={name,salt,passwordHash:hashPassword(password,salt),profile}; saveAccounts();
         } else {
           const u=accountDB.users[key]; if(!u||hashPassword(password,u.salt)!==u.passwordHash) return sendJSON(res,401,{error:'이름 또는 비밀번호가 올바르지 않습니다.'});
