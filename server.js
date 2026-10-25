@@ -21,10 +21,6 @@ const server = http.createServer(async (req, res) => {
   const pathname = decodeURIComponent((req.url || '/').split('?')[0]);
   if(pathname.startsWith('/api/')){
     if(req.method==='OPTIONS'){res.writeHead(204,{'Access-Control-Allow-Methods':'GET,POST,OPTIONS','Access-Control-Allow-Headers':'Content-Type,Authorization'});return res.end();}
-    if(pathname==='/api/leaderboard' && req.method==='GET'){
-      const users=Object.values(accountDB.users).map(u=>({name:u.name,trophies:Number(u.profile?.trophies)||0,wins:Number(u.profile?.wins)||0})).sort((a,b)=>b.trophies-a.trophies||b.wins-a.wins||a.name.localeCompare(b.name,'ko')).slice(0,100);
-      return sendJSON(res,200,{users});
-    }
     if(req.method!=='POST') return sendJSON(res,405,{error:'지원하지 않는 요청입니다.'});
     try{
       const body=await readBody(req);
