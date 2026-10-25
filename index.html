@@ -57,6 +57,27 @@ function loadDB(){try{return JSON.parse(localStorage.getItem('wd_save_v1'))||{us
 function saveDB(){localStorage.setItem('wd_save_v1',JSON.stringify(db))}
 async function apiRequest(path,body=null,token=null){const options={method:body===null?'GET':'POST',headers:{}};if(body!==null){options.headers['Content-Type']='application/json';options.body=JSON.stringify(body)}if(token)options.headers.Authorization='Bearer '+token;const res=await fetch(path,options);let data={};try{data=await res.json()}catch{}if(!res.ok)throw new Error(data.error||'서버 요청에 실패했습니다.');return data}
 async function syncServerProfile(p){if(!serverToken||!user)return;try{const r=await apiRequest('/api/profile',{profile:p},serverToken);if(r.profile){db.users[user].profile=r.profile;saveDB();syncUI()}}catch(e){console.warn('계정 저장 실패:',e.message)}}
+function profile(){
+ const fallback={name:user||'게스트',trophies:0,wins:0,losses:0,best:0,history:[],unlocked:['spider']};
+ if(user){
+  if(!db.users||typeof db.users!=='object')db.users={};
+  if(!db.users[user]||typeof db.users[user]!=='object')db.users[user]={profile:{...fallback,name:user}};
+  if(!db.users[user].profile||typeof db.users[user].profile!=='object')db.users[user].profile={...fallback,name:user};
+  const p=db.users[user].profile;
+  if(!Array.isArray(p.history))p.history=[];
+  if(!Array.isArray(p.unlocked))p.unlocked=['spider'];
+  for(const k of ['trophies','wins','losses','best'])if(!Number.isFinite(Number(p[k])))p[k]=0;else p[k]=Number(p[k]);
+  p.name=p.name||user;
+  return p;
+ }
+ if(!db.guest||typeof db.guest!=='object')db.guest={...fallback};
+ const p=db.guest;
+ if(!Array.isArray(p.history))p.history=[];
+ if(!Array.isArray(p.unlocked))p.unlocked=['spider'];
+ for(const k of ['trophies','wins','losses','best'])if(!Number.isFinite(Number(p[k])))p[k]=0;else p[k]=Number(p[k]);
+ p.name=p.name||'게스트';
+ return p;
+}
 function syncUI(){let p=profile();document.getElementById('userPill').textContent='👤 '+p.name;document.getElementById('headTrophies').textContent=p.trophies;document.getElementById('trophyCount').textContent=p.trophies;document.getElementById('winsCount').textContent=p.wins;document.getElementById('lossCount').textContent=p.losses;document.getElementById('bestCount').textContent=p.best;document.getElementById('battleTrophy').textContent=p.trophies;document.getElementById('historyList').innerHTML=p.history.length?p.history.slice(0,8).map(h=>`<div class="leader"><span>${h.win?'🏆 승리':'💥 패배'} · ${h.fighter}</span><b style="color:${h.win?'#69e9b0':'#ff819b'}">${h.win?'+8':'−4'} 트로피</b></div>`).join(''):'<p class="empty">아직 전투 기록이 없습니다. 첫 승리를 기록해 보세요!</p>';renderFighters()}
 function fighterCard(id){let f=FIGHTERS[id],need=id==='hammer'?50:id==='vampire'?100:id==='poojizik'?150:id==='meto'?200:0,locked=!profile().unlocked.includes(id),isSelected=selected===id;return `<div class="panel fighter" style="border-color:${isSelected?'#5de8f2':'var(--line)'};background:${locked?'linear-gradient(145deg,#191d2e,#141827)':'#171d33'}"><div class="portrait ${id==='hammer'?'hammer':id==='vampire'?'vampire':id==='poojizik'?'poojizik':id==='meto'?'meto':id==='spider'?'spider':''}" style="opacity:${locked?'.55':'1'}">${f.emoji}</div><div style="flex:1;min-width:0"><h3>${f.name} ${locked?'🔒':''}</h3><span class="tag">체력 ${f.hp}</span><span class="tag">${f.unlock}</span>${isSelected?'<span class="tag" style="background:#16434b;color:#8af5f4">현재 선택</span>':''}<p>${f.desc}</p><p><b>기본 공격:</b> ${f.attack} · ${f.damage}</p><p><b>궁극기:</b> ${f.super}</p>${locked?`<button disabled>🔒 트로피 ${need}개 필요</button>`:`<button class="${isSelected?'primary':'gold'}" onclick="chooseFighter('${id}')">${isSelected?'선택 중':'전사 선택'}</button>`}</div></div>`}
 function renderFighters(){const codex=document.getElementById('codexFighters');if(codex)codex.innerHTML=Object.keys(FIGHTERS).map(fighterCard).join('')}
