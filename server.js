@@ -8,33 +8,63 @@ const ROOT = __dirname;
 const DATA_DIR = process.env.DATA_DIR || (fs.existsSync('/data') ? '/data' : path.join(ROOT, 'data'));
 const DB_FILE = path.join(DATA_DIR, 'accounts.json');
 fs.mkdirSync(DATA_DIR, { recursive: true });
-function loadAccounts(){
-  // 계정이 0개인 새 DB보다 사용자 데이터가 남은 백업/이전 경로를 우선한다.
-  const candidates=[...new Set([DB_FILE,DB_FILE+'.bak',path.join(ROOT,'data','accounts.json'),path.join(ROOT,'data','accounts.json.bak'),path.join(ROOT,'accounts.json')])];
-  const valid=[];
-  for (const candidate of candidates) {
-    try { const v=JSON.parse(fs.readFileSync(candidate,'utf8')); if(v && v.users && typeof v.users==='object') valid.push({candidate,value:v,count:Object.keys(v.users).length}); } catch {}
+function normalizeUserMap(db){
+  const out={};
+  for(const [oldKey, raw] of Object.entries(db && db.users && typeof db.users==='object' ? db.users : {})){
+    if(!raw || typeof raw!=='object') continue;
+    const u={...raw};
+    const displayName=String(u.name || u.profile?.name || oldKey || '').trim().normalize('NFKC');
+    if(!displayName) continue;
+    u.name=displayName;
+    u.profile=(u.profile && typeof u.profile==='object') ? {...u.profile,name:displayName} : {name:displayName,trophies:0,wins:0,losses:0,best:0,history:[],unlocked:['spider']};
+    const key=displayName.toLocaleLowerCase('ko-KR');
+    // If case/normalization variants exist, keep the record with more profile progress.
+    const score=x=>Number(x?.profile?.trophies||0)+Number(x?.profile?.wins||0)*2+Number(x?.profile?.best||0);
+    if(!out[key] || score(u)>score(out[key])) out[key]=u;
   }
-  valid.sort((a,b)=>b.count-a.count);
+  return {users:out};
+}
+function loadAccounts(){
+  // Check both the configured persistent disk and older app-directory locations.
+  const candidates=[...new Set([DB_FILE,DB_FILE+'.bak',path.join(ROOT,'data','accounts.json'),path.join(ROOT,'data','accounts.json.bak'),path.join(ROOT,'accounts.json'),'/data/accounts.json','/data/accounts.json.bak'])];
+  const valid=[];
+  for(const candidate of candidates){
+    try{
+      const raw=JSON.parse(fs.readFileSync(candidate,'utf8'));
+      if(raw && raw.users && typeof raw.users==='object'){
+        const normalized=normalizeUserMap(raw);
+        valid.push({candidate,value:normalized,count:Object.keys(normalized.users).length,bytes:fs.statSync(candidate).size});
+      }
+    }catch{}
+  }
+  // Never prefer an empty freshly-created DB over a backup containing accounts.
+  valid.sort((a,b)=>b.count-a.count || b.bytes-a.bytes);
   const found=valid.find(x=>x.count>0)||valid[0];
   if(found){
-    if(found.candidate!==DB_FILE && found.count>0){
-      try { const tmp=DB_FILE+'.migrate.tmp'; fs.writeFileSync(tmp,JSON.stringify(found.value),{mode:0o600}); fs.renameSync(tmp,DB_FILE); console.log(`기존 계정 DB 복구/이전: ${found.candidate} -> ${DB_FILE} (${found.count}개 계정)`); }
-      catch(e) { console.error('기존 계정 DB 이전 실패:',e.message); }
+    if(found.candidate!==DB_FILE){
+      try{
+        if(fs.existsSync(DB_FILE) && !fs.existsSync(DB_FILE+'.bak')) fs.copyFileSync(DB_FILE,DB_FILE+'.bak');
+        const tmp=DB_FILE+'.migrate.tmp';
+        fs.writeFileSync(tmp,JSON.stringify(found.value),{mode:0o600});
+        fs.renameSync(tmp,DB_FILE);
+        console.log(`계정 DB 이전 완료: ${found.candidate} -> ${DB_FILE} (${found.count}개 계정)`);
+      }catch(e){console.error('계정 DB 이전 실패:',e.message);}
     }
-    console.log(`계정 DB 읽음: ${found.candidate} (${found.count}개 계정)`);
+    console.log(`계정 DB 확인: ${found.candidate} (${found.count}개 계정)`);
     return found.value;
   }
-  console.warn(`기존 계정 DB를 찾지 못했습니다. 새 계정 DB로 시작합니다: ${DB_FILE}`);
-  console.warn('Render 재배포 후 계정/랭킹 유지에는 Persistent Disk가 /data에 마운트되어 있어야 합니다. 이미 삭제된 DB는 백업 파일이 없으면 코드만으로 복구할 수 없습니다.');
+  console.error(`계정 DB를 찾지 못했습니다. 새 계정 DB를 만들기 전에 DATA_DIR 및 Render Persistent Disk를 확인하세요. 대상 경로: ${DB_FILE}`);
   return {users:{}};
 }
 let accountDB=loadAccounts();
 function saveAccounts(){
   const tmp=DB_FILE+'.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(accountDB), {mode:0o600});
-  if(fs.existsSync(DB_FILE)){ try { fs.copyFileSync(DB_FILE, DB_FILE+'.bak'); } catch(e) { console.error('계정 DB 백업 실패:',e.message); } }
-  fs.renameSync(tmp, DB_FILE);
+  // Keep the previous database as a backup before replacing it.
+  if(fs.existsSync(DB_FILE)){
+    try{fs.copyFileSync(DB_FILE,DB_FILE+'.bak');}catch(e){console.error('계정 DB 백업 실패:',e.message);throw e;}
+  }
+  fs.writeFileSync(tmp,JSON.stringify(accountDB),{mode:0o600});
+  fs.renameSync(tmp,DB_FILE);
 }
 const sessions = new Map();
 function publicProfile(u){ const p=u.profile||{}; return {name:u.name,trophies:Number(p.trophies)||0,wins:Number(p.wins)||0,losses:Number(p.losses)||0,best:Number(p.best)||0,history:Array.isArray(p.history)?p.history.slice(0,12):[],unlocked:Array.isArray(p.unlocked)?p.unlocked:['spider']}; }
@@ -63,7 +93,17 @@ const server = http.createServer(async (req, res) => {
           const profile={name,trophies:0,wins:0,losses:0,best:0,history:[],unlocked:['spider']};
           accountDB.users[key]={name,salt,passwordHash:hashPassword(password,salt),profile}; saveAccounts();
         } else {
-          const u=accountDB.users[key]; if(!u||hashPassword(password,u.salt)!==u.passwordHash) return sendJSON(res,401,{error:'이름 또는 비밀번호가 올바르지 않습니다.'});
+          const u=accountDB.users[key];
+          if(!u) return sendJSON(res,401,{error:'계정을 찾을 수 없습니다. 기존 계정 데이터가 연결된 디스크에 있는지 확인해 주세요.'});
+          let valid=false;
+          if(typeof u.salt==='string' && typeof u.passwordHash==='string'){
+            try{valid=crypto.timingSafeEqual(Buffer.from(hashPassword(password,u.salt),'hex'),Buffer.from(u.passwordHash,'hex'));}catch{valid=false;}
+          } else if(typeof u.password==='string') {
+            // Older versions stored password directly. Verify it once, then migrate to a salted hash.
+            valid=(u.password===password);
+            if(valid){const salt=crypto.randomBytes(16).toString('hex');u.salt=salt;u.passwordHash=hashPassword(password,salt);delete u.password;saveAccounts();}
+          }
+          if(!valid) return sendJSON(res,401,{error:'이름 또는 비밀번호가 올바르지 않습니다.'});
         }
         const u=accountDB.users[key]; const token=crypto.randomBytes(32).toString('hex'); sessions.set(token,key);
         return sendJSON(res,200,{token,profile:publicProfile(u)});
