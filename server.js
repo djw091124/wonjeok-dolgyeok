@@ -53,7 +53,7 @@ function loadAccounts(){
     console.log(`계정 DB 확인: ${found.candidate} (${found.count}개 계정)`);
     return found.value;
   }
-  console.error(`계정 DB를 찾지 못했습니다. 새 계정 DB를 만들기 전에 DATA_DIR 및 Render Persistent Disk를 확인하세요. 대상 경로: ${DB_FILE}`);
+  console.error(`기존 계정 DB를 찾지 못했습니다. 새 가입은 허용되지만 기존 계정/트로피 복구를 의미하지 않습니다. Render Persistent Disk와 백업을 확인하세요. 대상 경로: ${DB_FILE}`);
   return {users:{}};
 }
 let accountDB=loadAccounts();
@@ -105,7 +105,6 @@ const server = http.createServer(async (req, res) => {
         if(name.length<2||name.length>16||/[\\/<>\u0000-\u001f]/.test(name)) return sendJSON(res,400,{error:'이름은 2~16자로 입력해 주세요.'});
         if(password.length<4||password.length>128) return sendJSON(res,400,{error:'비밀번호는 4~128자로 입력해 주세요.'});
         if(pathname==='/api/signup'){
-          if(hostedWithoutDB && !accountDBReady) return sendJSON(res,503,{error:'기존 계정 DB를 찾지 못해 회원가입을 일시 중지했습니다. 계정 초기화를 막기 위한 보호 조치입니다. Render Persistent Disk와 이전 accounts.json 백업을 확인해 주세요.'});
           if(accountDB.users[key]) return sendJSON(res,409,{error:'이미 사용 중인 이름입니다. 다른 이름을 사용해 주세요.'});
           const salt=crypto.randomBytes(16).toString('hex');
           const profile={name,trophies:0,wins:0,losses:0,best:0,history:[],unlocked:['spider']};
