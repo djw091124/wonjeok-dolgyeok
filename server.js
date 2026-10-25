@@ -57,6 +57,9 @@ function loadAccounts(){
   return {users:{}};
 }
 let accountDB=loadAccounts();
+// Fail closed on hosted deployments when no existing database was found: do not silently create a fresh account table.
+let accountDBReady=fs.existsSync(DB_FILE);
+const hostedWithoutDB=!accountDBReady && (process.env.RENDER==='true' || process.env.NODE_ENV==='production');
 function saveAccounts(){
   const tmp=DB_FILE+'.tmp';
   // Keep the previous database as a backup before replacing it.
@@ -65,6 +68,7 @@ function saveAccounts(){
   }
   fs.writeFileSync(tmp,JSON.stringify(accountDB),{mode:0o600});
   fs.renameSync(tmp,DB_FILE);
+  accountDBReady=true;
 }
 const sessions = new Map();
 function publicProfile(u){ const p=u.profile||{}; return {name:u.name,trophies:Number(p.trophies)||0,wins:Number(p.wins)||0,losses:Number(p.losses)||0,best:Number(p.best)||0,history:Array.isArray(p.history)?p.history.slice(0,12):[],unlocked:Array.isArray(p.unlocked)?p.unlocked:['spider']}; }
@@ -80,14 +84,28 @@ const server = http.createServer(async (req, res) => {
       const users=Object.values(accountDB.users).map(u=>({name:u.name,trophies:Number(u.profile?.trophies)||0,wins:Number(u.profile?.wins)||0})).sort((a,b)=>b.trophies-a.trophies||b.wins-a.wins||a.name.localeCompare(b.name,'ko')).slice(0,100);
       return sendJSON(res,200,{users});
     }
+    if(pathname==='/api/mail' && req.method==='GET'){
+      const token=String(req.headers.authorization||'').replace(/^Bearer\s+/i,''); const key=sessions.get(token); if(!key||!accountDB.users[key])return sendJSON(res,401,{error:'메일을 확인하려면 다시 로그인해 주세요.'});
+      const claimed=Array.isArray(accountDB.users[key].claimedMailIds)?accountDB.users[key].claimedMailIds:[];
+      return sendJSON(res,200,{mails:[{id:'special-trophies-1000-v1',title:'특별 보상! 트로피 1,000개 지급',body:'항상 원격돌격을 플레이해 주셔서 감사합니다! 우편함에서 보상 받기를 눌러 특별 트로피를 수령하세요.',trophies:1000,claimed:claimed.includes('special-trophies-1000-v1')}]});
+    }
     if(req.method!=='POST') return sendJSON(res,405,{error:'지원하지 않는 요청입니다.'});
     try{
       const body=await readBody(req);
+      if(pathname==='/api/mail/claim'){
+        const token=String(req.headers.authorization||'').replace(/^Bearer\s+/i,''); const key=sessions.get(token); if(!key||!accountDB.users[key])return sendJSON(res,401,{error:'보상을 받으려면 다시 로그인해 주세요.'});
+        const mailId=String(body.id||''); if(mailId!=='special-trophies-1000-v1')return sendJSON(res,404,{error:'메일을 찾을 수 없습니다.'});
+        const u=accountDB.users[key]; if(!Array.isArray(u.claimedMailIds))u.claimedMailIds=[];
+        if(u.claimedMailIds.includes(mailId))return sendJSON(res,200,{alreadyClaimed:true,profile:publicProfile(u)});
+        const p=cleanProfile(u.profile,u.name); p.trophies=Math.min(1000000,p.trophies+1000); p.best=Math.max(p.best,p.trophies); u.profile=p; u.claimedMailIds.push(mailId); saveAccounts();
+        return sendJSON(res,200,{alreadyClaimed:false,profile:publicProfile(u)});
+      }
       if(pathname==='/api/signup' || pathname==='/api/login'){
         const name=String(body.name||'').trim().normalize('NFKC'); const key=name.toLocaleLowerCase('ko-KR'); const password=String(body.password||'');
         if(name.length<2||name.length>16||/[\\/<>\u0000-\u001f]/.test(name)) return sendJSON(res,400,{error:'이름은 2~16자로 입력해 주세요.'});
         if(password.length<4||password.length>128) return sendJSON(res,400,{error:'비밀번호는 4~128자로 입력해 주세요.'});
         if(pathname==='/api/signup'){
+          if(hostedWithoutDB && !accountDBReady) return sendJSON(res,503,{error:'기존 계정 DB를 찾지 못해 회원가입을 일시 중지했습니다. 계정 초기화를 막기 위한 보호 조치입니다. Render Persistent Disk와 이전 accounts.json 백업을 확인해 주세요.'});
           if(accountDB.users[key]) return sendJSON(res,409,{error:'이미 사용 중인 이름입니다. 다른 이름을 사용해 주세요.'});
           const salt=crypto.randomBytes(16).toString('hex');
           const profile={name,trophies:0,wins:0,losses:0,best:0,history:[],unlocked:['spider']};
@@ -110,7 +128,13 @@ const server = http.createServer(async (req, res) => {
       }
       if(pathname==='/api/profile'){
         const token=String(req.headers.authorization||'').replace(/^Bearer\s+/i,''); const key=sessions.get(token); if(!key||!accountDB.users[key])return sendJSON(res,401,{error:'로그인이 만료되었습니다. 다시 로그인해 주세요.'});
-        accountDB.users[key].profile=cleanProfile(body.profile,accountDB.users[key].name); saveAccounts(); return sendJSON(res,200,{profile:publicProfile(accountDB.users[key])});
+        const u=accountDB.users[key]; const current=cleanProfile(u.profile,u.name); const incoming=cleanProfile(body.profile,u.name);
+        // Never let an old browser cache overwrite server-side trophy progress. Match results are applied as deltas.
+        if(body.result==='win'){current.trophies=Math.min(1000000,current.trophies+8);current.wins+=1;}
+        else if(body.result==='loss'){current.trophies=Math.max(0,current.trophies-4);current.losses+=1;}
+        else {current.trophies=Math.max(current.trophies,incoming.trophies);current.wins=Math.max(current.wins,incoming.wins);current.losses=Math.max(current.losses,incoming.losses);}
+        current.best=Math.max(current.best,current.trophies,incoming.best); current.history=incoming.history; current.unlocked=[...new Set([...(current.unlocked||[]),...(incoming.unlocked||[])])];
+        u.profile=cleanProfile(current,u.name); saveAccounts(); return sendJSON(res,200,{profile:publicProfile(u)});
       }
       return sendJSON(res,404,{error:'API를 찾을 수 없습니다.'});
     }catch(e){return sendJSON(res,400,{error:e.message||'요청을 처리하지 못했습니다.'});}
