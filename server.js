@@ -8,9 +8,19 @@ const ROOT = __dirname;
 const DATA_DIR = process.env.DATA_DIR || (fs.existsSync('/data') ? '/data' : path.join(ROOT, 'data'));
 const DB_FILE = path.join(DATA_DIR, 'accounts.json');
 fs.mkdirSync(DATA_DIR, { recursive: true });
-function loadAccounts(){ try { const v=JSON.parse(fs.readFileSync(DB_FILE,'utf8')); return v && v.users ? v : {users:{}}; } catch { return {users:{}}; } }
+function loadAccounts(){
+  for (const candidate of [DB_FILE, DB_FILE+'.bak']) {
+    try { const v=JSON.parse(fs.readFileSync(candidate,'utf8')); if(v && v.users && typeof v.users==='object') return v; } catch {}
+  }
+  return {users:{}};
+}
 let accountDB=loadAccounts();
-function saveAccounts(){ const tmp=DB_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(accountDB), {mode:0o600}); fs.renameSync(tmp, DB_FILE); }
+function saveAccounts(){
+  const tmp=DB_FILE+'.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(accountDB), {mode:0o600});
+  if(fs.existsSync(DB_FILE)){ try { fs.copyFileSync(DB_FILE, DB_FILE+'.bak'); } catch(e) { console.error('계정 DB 백업 실패:',e.message); } }
+  fs.renameSync(tmp, DB_FILE);
+}
 const sessions = new Map();
 function publicProfile(u){ const p=u.profile||{}; return {name:u.name,trophies:Number(p.trophies)||0,wins:Number(p.wins)||0,losses:Number(p.losses)||0,best:Number(p.best)||0,history:Array.isArray(p.history)?p.history.slice(0,12):[],unlocked:Array.isArray(p.unlocked)?p.unlocked:['spider']}; }
 function hashPassword(password,salt){ return crypto.scryptSync(password,salt,64).toString('hex'); }
@@ -70,5 +80,5 @@ wss.on('connection', ws => {
   ws.on('close', () => { if (waiting === ws) waiting = null; if (ws.room) { const room = ws.room; rooms.delete(room.id); broadcast(room, ws, { type: 'opponent_left' }); for (const p of room.players) { p.room = null; if (p !== ws) send(p, { type: 'opponent_left' }); } } });
 });
 const heartbeat = setInterval(() => { for (const ws of wss.clients) { if (!ws.alive) { ws.terminate(); continue; } ws.alive = false; ws.ping(); } }, 30000);
-server.listen(PORT, '0.0.0.0', () => console.log(`원격돌격 서버 실행: ${PORT}; 계정 DB: ${DB_FILE}`));
+server.listen(PORT, '0.0.0.0', () => { console.log(`원격돌격 서버 실행: ${PORT}; 계정 DB: ${DB_FILE}`); if (DATA_DIR !== '/data' && process.env.NODE_ENV === 'production') console.warn('주의: Render Persistent Disk를 /data에 연결해야 계정과 랭킹이 재배포 후에도 유지됩니다.'); });
 process.on('SIGTERM', () => { clearInterval(heartbeat); server.close(() => process.exit(0)); });

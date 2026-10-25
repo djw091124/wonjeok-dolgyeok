@@ -1,6 +1,6 @@
 {
   "name": "wonjeok-dolgyeok-online",
-  "version": "1.0.0",
+  "version": "4.7.2",
   "private": true,
   "description": "원격돌격 실시간 유저 매칭 서버",
   "main": "server.js",
