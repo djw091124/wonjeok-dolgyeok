@@ -8,68 +8,9 @@ const ROOT = __dirname;
 const DATA_DIR = process.env.DATA_DIR || (fs.existsSync('/data') ? '/data' : path.join(ROOT, 'data'));
 const DB_FILE = path.join(DATA_DIR, 'accounts.json');
 fs.mkdirSync(DATA_DIR, { recursive: true });
-function normalizeUserMap(db){
-  const out={};
-  for(const [oldKey, raw] of Object.entries(db && db.users && typeof db.users==='object' ? db.users : {})){
-    if(!raw || typeof raw!=='object') continue;
-    const u={...raw};
-    const displayName=String(u.name || u.profile?.name || oldKey || '').trim().normalize('NFKC');
-    if(!displayName) continue;
-    u.name=displayName;
-    u.profile=(u.profile && typeof u.profile==='object') ? {...u.profile,name:displayName} : {name:displayName,trophies:0,wins:0,losses:0,best:0,history:[],unlocked:['spider']};
-    const key=displayName.toLocaleLowerCase('ko-KR');
-    // If case/normalization variants exist, keep the record with more profile progress.
-    const score=x=>Number(x?.profile?.trophies||0)+Number(x?.profile?.wins||0)*2+Number(x?.profile?.best||0);
-    if(!out[key] || score(u)>score(out[key])) out[key]=u;
-  }
-  return {users:out};
-}
-function loadAccounts(){
-  // Check both the configured persistent disk and older app-directory locations.
-  const candidates=[...new Set([DB_FILE,DB_FILE+'.bak',path.join(ROOT,'data','accounts.json'),path.join(ROOT,'data','accounts.json.bak'),path.join(ROOT,'accounts.json'),'/data/accounts.json','/data/accounts.json.bak'])];
-  const valid=[];
-  for(const candidate of candidates){
-    try{
-      const raw=JSON.parse(fs.readFileSync(candidate,'utf8'));
-      if(raw && raw.users && typeof raw.users==='object'){
-        const normalized=normalizeUserMap(raw);
-        valid.push({candidate,value:normalized,count:Object.keys(normalized.users).length,bytes:fs.statSync(candidate).size});
-      }
-    }catch{}
-  }
-  // Never prefer an empty freshly-created DB over a backup containing accounts.
-  valid.sort((a,b)=>b.count-a.count || b.bytes-a.bytes);
-  const found=valid.find(x=>x.count>0)||valid[0];
-  if(found){
-    if(found.candidate!==DB_FILE){
-      try{
-        if(fs.existsSync(DB_FILE) && !fs.existsSync(DB_FILE+'.bak')) fs.copyFileSync(DB_FILE,DB_FILE+'.bak');
-        const tmp=DB_FILE+'.migrate.tmp';
-        fs.writeFileSync(tmp,JSON.stringify(found.value),{mode:0o600});
-        fs.renameSync(tmp,DB_FILE);
-        console.log(`계정 DB 이전 완료: ${found.candidate} -> ${DB_FILE} (${found.count}개 계정)`);
-      }catch(e){console.error('계정 DB 이전 실패:',e.message);}
-    }
-    console.log(`계정 DB 확인: ${found.candidate} (${found.count}개 계정)`);
-    return found.value;
-  }
-  console.error(`기존 계정 DB를 찾지 못했습니다. 새 가입은 허용되지만 기존 계정/트로피 복구를 의미하지 않습니다. Render Persistent Disk와 백업을 확인하세요. 대상 경로: ${DB_FILE}`);
-  return {users:{}};
-}
+function loadAccounts(){ try { const v=JSON.parse(fs.readFileSync(DB_FILE,'utf8')); return v && v.users ? v : {users:{}}; } catch { return {users:{}}; } }
 let accountDB=loadAccounts();
-// Fail closed on hosted deployments when no existing database was found: do not silently create a fresh account table.
-let accountDBReady=fs.existsSync(DB_FILE);
-const hostedWithoutDB=!accountDBReady && (process.env.RENDER==='true' || process.env.NODE_ENV==='production');
-function saveAccounts(){
-  const tmp=DB_FILE+'.tmp';
-  // Keep the previous database as a backup before replacing it.
-  if(fs.existsSync(DB_FILE)){
-    try{fs.copyFileSync(DB_FILE,DB_FILE+'.bak');}catch(e){console.error('계정 DB 백업 실패:',e.message);throw e;}
-  }
-  fs.writeFileSync(tmp,JSON.stringify(accountDB),{mode:0o600});
-  fs.renameSync(tmp,DB_FILE);
-  accountDBReady=true;
-}
+function saveAccounts(){ const tmp=DB_FILE+'.tmp'; fs.writeFileSync(tmp, JSON.stringify(accountDB), {mode:0o600}); fs.renameSync(tmp, DB_FILE); }
 const sessions = new Map();
 function publicProfile(u){ const p=u.profile||{}; return {name:u.name,trophies:Number(p.trophies)||0,wins:Number(p.wins)||0,losses:Number(p.losses)||0,best:Number(p.best)||0,history:Array.isArray(p.history)?p.history.slice(0,12):[],unlocked:Array.isArray(p.unlocked)?p.unlocked:['spider']}; }
 function hashPassword(password,salt){ return crypto.scryptSync(password,salt,64).toString('hex'); }
@@ -84,22 +25,9 @@ const server = http.createServer(async (req, res) => {
       const users=Object.values(accountDB.users).map(u=>({name:u.name,trophies:Number(u.profile?.trophies)||0,wins:Number(u.profile?.wins)||0})).sort((a,b)=>b.trophies-a.trophies||b.wins-a.wins||a.name.localeCompare(b.name,'ko')).slice(0,100);
       return sendJSON(res,200,{users});
     }
-    if(pathname==='/api/mail' && req.method==='GET'){
-      const token=String(req.headers.authorization||'').replace(/^Bearer\s+/i,''); const key=sessions.get(token); if(!key||!accountDB.users[key])return sendJSON(res,401,{error:'메일을 확인하려면 다시 로그인해 주세요.'});
-      const claimed=Array.isArray(accountDB.users[key].claimedMailIds)?accountDB.users[key].claimedMailIds:[];
-      return sendJSON(res,200,{mails:[{id:'special-trophies-1000-v1',title:'특별 보상! 트로피 1,000개 지급',body:'항상 원격돌격을 플레이해 주셔서 감사합니다! 우편함에서 보상 받기를 눌러 특별 트로피를 수령하세요.',trophies:1000,claimed:claimed.includes('special-trophies-1000-v1')}]});
-    }
     if(req.method!=='POST') return sendJSON(res,405,{error:'지원하지 않는 요청입니다.'});
     try{
       const body=await readBody(req);
-      if(pathname==='/api/mail/claim'){
-        const token=String(req.headers.authorization||'').replace(/^Bearer\s+/i,''); const key=sessions.get(token); if(!key||!accountDB.users[key])return sendJSON(res,401,{error:'보상을 받으려면 다시 로그인해 주세요.'});
-        const mailId=String(body.id||''); if(mailId!=='special-trophies-1000-v1')return sendJSON(res,404,{error:'메일을 찾을 수 없습니다.'});
-        const u=accountDB.users[key]; if(!Array.isArray(u.claimedMailIds))u.claimedMailIds=[];
-        if(u.claimedMailIds.includes(mailId))return sendJSON(res,200,{alreadyClaimed:true,profile:publicProfile(u)});
-        const p=cleanProfile(u.profile,u.name); p.trophies=Math.min(1000000,p.trophies+1000); p.best=Math.max(p.best,p.trophies); u.profile=p; u.claimedMailIds.push(mailId); saveAccounts();
-        return sendJSON(res,200,{alreadyClaimed:false,profile:publicProfile(u)});
-      }
       if(pathname==='/api/signup' || pathname==='/api/login'){
         const name=String(body.name||'').trim().normalize('NFKC'); const key=name.toLocaleLowerCase('ko-KR'); const password=String(body.password||'');
         if(name.length<2||name.length>16||/[\\/<>\u0000-\u001f]/.test(name)) return sendJSON(res,400,{error:'이름은 2~16자로 입력해 주세요.'});
@@ -110,30 +38,14 @@ const server = http.createServer(async (req, res) => {
           const profile={name,trophies:0,wins:0,losses:0,best:0,history:[],unlocked:['spider']};
           accountDB.users[key]={name,salt,passwordHash:hashPassword(password,salt),profile}; saveAccounts();
         } else {
-          const u=accountDB.users[key];
-          if(!u) return sendJSON(res,401,{error:'계정을 찾을 수 없습니다. 기존 계정 데이터가 연결된 디스크에 있는지 확인해 주세요.'});
-          let valid=false;
-          if(typeof u.salt==='string' && typeof u.passwordHash==='string'){
-            try{valid=crypto.timingSafeEqual(Buffer.from(hashPassword(password,u.salt),'hex'),Buffer.from(u.passwordHash,'hex'));}catch{valid=false;}
-          } else if(typeof u.password==='string') {
-            // Older versions stored password directly. Verify it once, then migrate to a salted hash.
-            valid=(u.password===password);
-            if(valid){const salt=crypto.randomBytes(16).toString('hex');u.salt=salt;u.passwordHash=hashPassword(password,salt);delete u.password;saveAccounts();}
-          }
-          if(!valid) return sendJSON(res,401,{error:'이름 또는 비밀번호가 올바르지 않습니다.'});
+          const u=accountDB.users[key]; if(!u||hashPassword(password,u.salt)!==u.passwordHash) return sendJSON(res,401,{error:'이름 또는 비밀번호가 올바르지 않습니다.'});
         }
         const u=accountDB.users[key]; const token=crypto.randomBytes(32).toString('hex'); sessions.set(token,key);
         return sendJSON(res,200,{token,profile:publicProfile(u)});
       }
       if(pathname==='/api/profile'){
         const token=String(req.headers.authorization||'').replace(/^Bearer\s+/i,''); const key=sessions.get(token); if(!key||!accountDB.users[key])return sendJSON(res,401,{error:'로그인이 만료되었습니다. 다시 로그인해 주세요.'});
-        const u=accountDB.users[key]; const current=cleanProfile(u.profile,u.name); const incoming=cleanProfile(body.profile,u.name);
-        // Never let an old browser cache overwrite server-side trophy progress. Match results are applied as deltas.
-        if(body.result==='win'){current.trophies=Math.min(1000000,current.trophies+8);current.wins+=1;}
-        else if(body.result==='loss'){current.trophies=Math.max(0,current.trophies-4);current.losses+=1;}
-        else {current.trophies=Math.max(current.trophies,incoming.trophies);current.wins=Math.max(current.wins,incoming.wins);current.losses=Math.max(current.losses,incoming.losses);}
-        current.best=Math.max(current.best,current.trophies,incoming.best); current.history=incoming.history; current.unlocked=[...new Set([...(current.unlocked||[]),...(incoming.unlocked||[])])];
-        u.profile=cleanProfile(current,u.name); saveAccounts(); return sendJSON(res,200,{profile:publicProfile(u)});
+        accountDB.users[key].profile=cleanProfile(body.profile,accountDB.users[key].name); saveAccounts(); return sendJSON(res,200,{profile:publicProfile(accountDB.users[key])});
       }
       return sendJSON(res,404,{error:'API를 찾을 수 없습니다.'});
     }catch(e){return sendJSON(res,400,{error:e.message||'요청을 처리하지 못했습니다.'});}
@@ -158,5 +70,5 @@ wss.on('connection', ws => {
   ws.on('close', () => { if (waiting === ws) waiting = null; if (ws.room) { const room = ws.room; rooms.delete(room.id); broadcast(room, ws, { type: 'opponent_left' }); for (const p of room.players) { p.room = null; if (p !== ws) send(p, { type: 'opponent_left' }); } } });
 });
 const heartbeat = setInterval(() => { for (const ws of wss.clients) { if (!ws.alive) { ws.terminate(); continue; } ws.alive = false; ws.ping(); } }, 30000);
-server.listen(PORT, '0.0.0.0', () => { console.log(`원격돌격 서버 실행: ${PORT}; 계정 DB: ${DB_FILE}`); if (DATA_DIR !== '/data' && process.env.NODE_ENV === 'production') console.warn('주의: Render Persistent Disk를 /data에 연결해야 계정과 랭킹이 재배포 후에도 유지됩니다.'); });
+server.listen(PORT, '0.0.0.0', () => console.log(`원격돌격 서버 실행: ${PORT}; 계정 DB: ${DB_FILE}`));
 process.on('SIGTERM', () => { clearInterval(heartbeat); server.close(() => process.exit(0)); });
