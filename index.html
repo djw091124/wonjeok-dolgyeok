@@ -25,13 +25,12 @@ header{display:flex;align-items:center;justify-content:space-between;gap:14px;pa
 <header><div class="brand">⭕ 원격<span>돌격</span></div><div class="stats"><span class="pill" id="userPill">👤 게스트</span><span class="pill">🏆 <b id="headTrophies">0</b></span><button id="authHeader" onclick="showScreen('auth')">로그인 / 가입</button></div></header>
 <main class="wrap">
 <section class="screen active" id="home">
- <div class="hero"><div class="eyebrow">ONE ARENA · ONE WINNER</div><h1>엄청난 원들의<br><span style="color:var(--cyan)">전쟁이 시작되었다</span></h1><p>원을 조종해 스킬을 퍼붓고 마지막까지 살아남으세요. 기본 공격으로 궁극기를 충전하고, 승리해 트로피를 모으세요.</p><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button id="musicToggle" onclick="toggleMenuMusic()">🎵 메뉴 음악 켜기</button><button onclick="showScreen('leaderboard')">🥇 트로피 랭킹</button></div></div>
+ <div class="hero"><div class="eyebrow">ONE ARENA · ONE WINNER</div><h1>엄청난 원들의<br><span style="color:var(--cyan)">전쟁이 시작되었다</span></h1><p>원을 조종해 스킬을 퍼붓고 마지막까지 살아남으세요. 기본 공격으로 궁극기를 충전하고, 승리해 트로피를 모으세요.</p><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button id="musicToggle" onclick="toggleMenuMusic()">🎵 메뉴 음악 켜기</button><button onclick="showScreen('leaderboard')">🥇 트로피 랭킹</button><button onclick="showScreen('mail')">📬 우편함</button></div></div>
  <div class="menu-grid">
  <button class="menu-card" onclick="showScreen('match')"><span class="emoji">⚔️</span><strong>유저 매칭</strong><small>대전 모드 선택하기</small></button>
  <button class="menu-card" onclick="startBattle('ai')"><span class="emoji">🤖</span><strong>AI 매칭</strong><small>컴퓨터 전사와 실전 대결</small></button>
  <button class="menu-card" onclick="showScreen('codex')"><span class="emoji">📖</span><strong>원 도감</strong><small>전사 능력과 잠금 해제</small></button>
  <button class="menu-card" onclick="showScreen('trophies')"><span class="emoji">🏆</span><strong>원 트로피</strong><small>내 전적과 트로피 확인</small></button>
- <button class="menu-card" onclick="showScreen('mail')"><span class="emoji">📬</span><strong>우편함</strong><small>특별 보상 메일 확인하기</small></button>
  </div>
  <p class="footer-note">※ 계정과 트로피는 서버에 저장됩니다. 같은 계정으로 로그인하면 다른 기기에서도 이어서 플레이할 수 있습니다.</p>
 </section>
